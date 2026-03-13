@@ -3,8 +3,12 @@
 
 from __future__ import annotations
 
+import ipaddress
+import logging
 import os
+import socket
 import tempfile
+import urllib.parse
 import urllib.request
 
 import librosa
@@ -16,12 +20,20 @@ from sense_music.sections import detect_sections
 from sense_music.spectrogram import render_spectrogram
 from sense_music.waveform import render_waveform
 
+logger = logging.getLogger("sense_music")
+
+# safety limits
+MAX_DURATION = 600  # seconds (10 minutes)
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB
+ALLOWED_EXTENSIONS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"}
+
 
 def analyze(
     source: str,
     *,
     lyrics: bool = True,
     whisper_model: str = "base",
+    max_duration: float = MAX_DURATION,
 ) -> Analysis:
     """Analyze an audio file and return a complete Analysis.
 
@@ -29,6 +41,7 @@ def analyze(
         source: File path or URL to an audio file.
         lyrics: Whether to transcribe lyrics with Whisper (default True).
         whisper_model: Whisper model size (default "base").
+        max_duration: Maximum audio duration in seconds (default 600).
 
     Returns:
         An Analysis object with all structured data and visualizations.
@@ -37,8 +50,11 @@ def analyze(
     audio_path = _resolve_source(source)
 
     try:
-        # load audio
-        y, sr = librosa.load(audio_path, sr=None, mono=True)
+        # validate file before loading
+        _validate_file(audio_path)
+
+        # load audio with duration cap and fixed sample rate
+        y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=max_duration)
         duration = float(len(y) / sr)
 
         # file info
@@ -68,8 +84,10 @@ def analyze(
             try:
                 from sense_music.lyrics import transcribe
                 lyric_lines = transcribe(audio_path, model_name=whisper_model)
-            except (ImportError, Exception):
-                pass  # whisper not available or failed
+            except ImportError:
+                pass  # whisper not installed
+            except Exception as exc:
+                logger.warning("Lyrics transcription failed: %s", exc)
 
         # visualizations
         spectrogram_img = render_spectrogram(y, sr, sections=sections, energy_curve=energy_curve)
@@ -98,14 +116,55 @@ def analyze(
             os.unlink(audio_path)
 
 
+def _validate_file(path: str) -> None:
+    """Validate file exists, is a regular file, and is within size limits."""
+    if not os.path.isfile(path):
+        raise ValueError(f"Not a file: {path}")
+    size = os.path.getsize(path)
+    if size == 0:
+        raise ValueError("Empty file")
+    if size > MAX_FILE_SIZE:
+        raise ValueError(f"File too large: {size} bytes (max {MAX_FILE_SIZE})")
+
+
 def _resolve_source(source: str) -> str:
     """Download URL to temp file or return path as-is."""
     if source.startswith(("http://", "https://")):
-        suffix = os.path.splitext(source.split("?")[0])[1] or ".mp3"
+        parsed = urllib.parse.urlparse(source)
+
+        # block non-http(s) schemes
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+
+        # resolve hostname and block private/loopback/link-local IPs
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("URL has no hostname")
+        for info in socket.getaddrinfo(hostname, parsed.port or 443):
+            addr = ipaddress.ip_address(info[4][0])
+            if addr.is_private or addr.is_loopback or addr.is_link_local:
+                raise ValueError(f"URL resolves to private/internal address")
+
+        # sanitize file extension
+        suffix = os.path.splitext(parsed.path)[1].lower()
+        if suffix not in ALLOWED_EXTENSIONS:
+            suffix = ".mp3"
+
         fd, tmp_path = tempfile.mkstemp(suffix=suffix)
-        os.close(fd)
-        urllib.request.urlretrieve(source, tmp_path)
+        try:
+            os.close(fd)
+            urllib.request.urlretrieve(source, tmp_path)
+        except Exception:
+            # clean up on download failure
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
         return tmp_path
+
+    # block non-http URI schemes (file://, ftp://, etc.)
+    if "://" in source:
+        raise ValueError(f"Unsupported URI scheme: {source}")
+
     return source
 
 

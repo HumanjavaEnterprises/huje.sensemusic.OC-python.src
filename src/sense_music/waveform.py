@@ -42,51 +42,53 @@ def render_waveform(
     fig_h = height / dpi
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
-    fig.patch.set_facecolor(_BG_COLOR)
-    ax.set_facecolor(_BG_COLOR)
+    try:
+        fig.patch.set_facecolor(_BG_COLOR)
+        ax.set_facecolor(_BG_COLOR)
 
-    duration = len(y) / sr
-    times = np.linspace(0, duration, len(y))
+        duration = len(y) / sr
+        times = np.linspace(0, duration, len(y))
 
-    # draw colored section regions
-    if sections:
-        for section in sections:
-            color = _SECTION_COLORS.get(section.label, _ACCENT)
-            ax.axvspan(section.start, section.end, alpha=0.15, color=color)
-            mid = (section.start + section.end) / 2
-            ax.text(
-                mid, ax.get_ylim()[1] if ax.get_ylim()[1] != 0 else 0.9,
-                section.label, color=color, fontsize=8, fontweight="bold",
-                ha="center", va="top",
-            )
+        # draw colored section regions
+        if sections:
+            for section in sections:
+                color = _SECTION_COLORS.get(section.label, _ACCENT)
+                ax.axvspan(section.start, section.end, alpha=0.15, color=color)
+                mid = (section.start + section.end) / 2
+                ax.text(
+                    mid, ax.get_ylim()[1] if ax.get_ylim()[1] != 0 else 0.9,
+                    section.label, color=color, fontsize=8, fontweight="bold",
+                    ha="center", va="top",
+                )
 
-    # waveform
-    ax.plot(times, y, color=_ACCENT, linewidth=0.3, alpha=0.8)
-    ax.fill_between(times, y, alpha=0.3, color=_ACCENT)
+        # waveform
+        ax.plot(times, y, color=_ACCENT, linewidth=0.3, alpha=0.8)
+        ax.fill_between(times, y, alpha=0.3, color=_ACCENT)
 
-    # section boundary lines
-    if sections:
-        for section in sections:
-            ax.axvline(x=section.start, color=_TEXT_COLOR, linewidth=0.8, alpha=0.5, linestyle=":")
+        # section boundary lines
+        if sections:
+            for section in sections:
+                ax.axvline(x=section.start, color=_TEXT_COLOR, linewidth=0.8, alpha=0.5, linestyle=":")
 
-    # style
-    ax.set_xlabel("Time", color=_TEXT_COLOR, fontsize=9)
-    ax.set_ylabel("Amplitude", color=_TEXT_COLOR, fontsize=9)
-    ax.tick_params(colors=_TEXT_COLOR, labelsize=7)
-    ax.set_xlim(0, duration)
-    for spine in ax.spines.values():
-        spine.set_color(_TEXT_COLOR)
+        # style
+        ax.set_xlabel("Time", color=_TEXT_COLOR, fontsize=9)
+        ax.set_ylabel("Amplitude", color=_TEXT_COLOR, fontsize=9)
+        ax.tick_params(colors=_TEXT_COLOR, labelsize=7)
+        ax.set_xlim(0, duration)
+        for spine in ax.spines.values():
+            spine.set_color(_TEXT_COLOR)
 
-    # format time axis as mm:ss
-    def _fmt_time(x, _pos):
-        m, s = divmod(int(x), 60)
-        return f"{m}:{s:02d}"
-    ax.xaxis.set_major_formatter(plt.FuncFormatter(_fmt_time))
+        # format time axis as mm:ss
+        def _fmt_time(x, _pos):
+            m, s = divmod(int(x), 60)
+            return f"{m}:{s:02d}"
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(_fmt_time))
 
-    fig.tight_layout(pad=0.5)
+        fig.tight_layout(pad=0.5)
 
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", facecolor=fig.get_facecolor(), bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return Image.open(buf).copy()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", facecolor=fig.get_facecolor(), bbox_inches="tight")
+        buf.seek(0)
+        return Image.open(buf).copy()
+    finally:
+        plt.close(fig)

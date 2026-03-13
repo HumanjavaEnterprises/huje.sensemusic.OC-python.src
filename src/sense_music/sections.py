@@ -8,15 +8,27 @@ import librosa
 
 from sense_music.types import Section
 
+# cap chroma frames to prevent quadratic memory in recurrence matrix
+# 2000 frames ~= 46 seconds at hop_length=512, sr=22050
+# for longer files we subsample the chroma
+MAX_CHROMA_FRAMES = 2000
+
 
 def detect_sections(y: np.ndarray, sr: int, duration: float) -> list[Section]:
     """Detect structural sections using spectral self-similarity and novelty."""
-    # compute mel spectrogram for self-similarity
-    S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, hop_length=512)
-    S_db = librosa.power_to_db(S, ref=np.max)
+    hop_length = 512
 
-    # novelty via checkerboard kernel on self-similarity matrix
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=512)
+    # compute chroma features
+    chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_length)
+
+    # subsample chroma if too many frames to avoid quadratic memory
+    n_orig_frames = chroma.shape[1]
+    subsample_factor = 1
+    if n_orig_frames > MAX_CHROMA_FRAMES:
+        subsample_factor = int(np.ceil(n_orig_frames / MAX_CHROMA_FRAMES))
+        chroma = chroma[:, ::subsample_factor]
+
+    # recurrence matrix (now bounded to MAX_CHROMA_FRAMES^2)
     rec = librosa.segment.recurrence_matrix(chroma, mode="affinity", sym=True)
 
     # checkerboard kernel novelty detection
@@ -31,15 +43,14 @@ def detect_sections(y: np.ndarray, sr: int, duration: float) -> list[Section]:
         bl = rec[i:i + half, i - half:i].mean()
         novelty[i] = (tl + br) - (tr + bl)
 
-    # pick peaks as boundaries
-    hop_length = 512
-    n_frames = len(novelty)
-    times = librosa.frames_to_time(np.arange(n_frames), sr=sr, hop_length=hop_length)
+    # map subsampled frames back to original time
+    frame_indices = np.arange(n_frames_rec) * subsample_factor
+    times = librosa.frames_to_time(frame_indices, sr=sr, hop_length=hop_length)
 
     # adaptive threshold: use median + std
     threshold = np.median(novelty) + np.std(novelty)
     peaks = []
-    for i in range(1, n_frames - 1):
+    for i in range(1, n_frames_rec - 1):
         if novelty[i] > threshold and novelty[i] >= novelty[i - 1] and novelty[i] >= novelty[i + 1]:
             peaks.append(i)
 

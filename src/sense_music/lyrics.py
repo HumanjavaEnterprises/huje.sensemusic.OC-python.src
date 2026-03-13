@@ -5,9 +5,14 @@ from __future__ import annotations
 
 from sense_music.types import LyricLine
 
+ALLOWED_MODELS = {"tiny", "base", "small", "medium", "large", "large-v2", "large-v3"}
+
 
 def transcribe(audio_path: str, model_name: str = "base") -> list[LyricLine]:
     """Transcribe lyrics using OpenAI Whisper with timestamps."""
+    if model_name not in ALLOWED_MODELS:
+        raise ValueError(f"Unknown whisper model: {model_name}. Allowed: {', '.join(sorted(ALLOWED_MODELS))}")
+
     import whisper
 
     model = whisper.load_model(model_name)
@@ -29,6 +34,9 @@ def transcribe(audio_path: str, model_name: str = "base") -> list[LyricLine]:
 
 def detect_language(audio_path: str, model_name: str = "base") -> str:
     """Detect the language of the audio."""
+    if model_name not in ALLOWED_MODELS:
+        raise ValueError(f"Unknown whisper model: {model_name}. Allowed: {', '.join(sorted(ALLOWED_MODELS))}")
+
     import whisper
 
     model = whisper.load_model(model_name)
