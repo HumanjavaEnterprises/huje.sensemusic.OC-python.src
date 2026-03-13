@@ -74,6 +74,12 @@ result = analyze("song.mp3", lyrics=False)
 - [Pillow](https://pillow.readthedocs.io/) — image handling
 - [openai-whisper](https://github.com/openai/whisper) — lyrics transcription (optional via `lyrics=False`)
 
+## Usage & Copyright
+
+You are responsible for ensuring you have the legal right to analyze any audio you submit to this tool, whether running locally or via the hosted service at [huje.tools](https://huje.tools). sense-music provides compute and analysis only — it does not store, host, or redistribute audio content. By using this tool, you accept full responsibility for the content you process and how you use the results.
+
+For details, see [huje.tools/support](https://huje.tools/support).
+
 ## License
 
 MIT — Humanjava Enterprises Inc.
