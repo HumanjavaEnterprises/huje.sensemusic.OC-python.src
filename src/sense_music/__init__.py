@@ -4,7 +4,7 @@
 from sense_music.analyze import analyze
 from sense_music.types import Analysis, Section, LyricLine, FileInfo, BPMInfo, KeyInfo
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __all__ = [
     "analyze",
     "Analysis",

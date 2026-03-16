@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sense-music"
-version = "0.1.1"
+version = "0.1.2"
 description = "Turn audio into structured analysis and annotated visualizations for AI perception"
 readme = "README.md"
 license = "MIT"
