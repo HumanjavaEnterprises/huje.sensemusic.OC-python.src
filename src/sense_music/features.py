@@ -65,19 +65,12 @@ def detect_key(y: np.ndarray, sr: int) -> KeyInfo:
 
 
 def compute_energy(y: np.ndarray, sr: int) -> list[float]:
-    """Compute per-second RMS energy curve."""
-    hop = sr  # one value per second
-    rms_frames = []
-    for i in range(0, len(y), hop):
-        frame = y[i:i + hop]
-        if len(frame) == 0:
-            break
-        rms_frames.append(float(np.sqrt(np.mean(frame ** 2))))
-    # normalize to 0-1
-    peak = max(rms_frames) if rms_frames else 1.0
+    """Compute per-second RMS energy curve, normalized to 0-1."""
+    rms = librosa.feature.rms(y=y, frame_length=sr, hop_length=sr)[0]
+    peak = float(rms.max()) if len(rms) > 0 else 1.0
     if peak > 0:
-        rms_frames = [round(v / peak, 3) for v in rms_frames]
-    return rms_frames
+        return [round(float(v / peak), 3) for v in rms]
+    return [0.0] * len(rms)
 
 
 def classify_genre(y: np.ndarray, sr: int) -> str:

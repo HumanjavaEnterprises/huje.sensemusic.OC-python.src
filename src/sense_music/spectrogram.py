@@ -8,28 +8,11 @@ import io
 import numpy as np
 import librosa
 import librosa.display
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from PIL import Image
 
 from sense_music.types import Section
-
-
-# huje.tools palette
-_BG_COLOR = "#0f172a"
-_CARD_COLOR = "#1e293b"
-_ACCENT = "#f97316"
-_TEXT_COLOR = "#e2e8f0"
-
-_SECTION_COLORS = {
-    "intro": "#38bdf8",
-    "verse": "#818cf8",
-    "chorus": "#f97316",
-    "bridge": "#a78bfa",
-    "outro": "#38bdf8",
-    "instrumental": "#2dd4bf",
-}
+from sense_music._palette import BG_COLOR as _BG_COLOR, ACCENT as _ACCENT, TEXT_COLOR as _TEXT_COLOR, SECTION_COLORS as _SECTION_COLORS
 
 
 def render_spectrogram(
