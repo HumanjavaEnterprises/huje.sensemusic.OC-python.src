@@ -1,7 +1,7 @@
 ---
 name: sense-music
 description: Audio analysis for AI perception — BPM, key, structure, genre, mood, lyrics, and annotated visualizations from any audio file.
-version: 0.1.2
+version: 0.1.3
 metadata:
   openclaw:
     requires:
