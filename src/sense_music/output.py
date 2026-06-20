@@ -51,6 +51,13 @@ def to_json(analysis: Analysis) -> dict:
         ],
         "structure": analysis.structure,
         "key_changes": analysis.key_changes,
+        "rhythm": analysis.rhythm,
+        "chords": analysis.chords,
+        "loudness": analysis.loudness,
+        "clap_tags": analysis.clap_tags,
+        "embedding": analysis.embedding,
+        "arrangement": analysis.arrangement,
+        "caption": analysis.caption,
         "lyrics": [
             {"start": l.start, "end": l.end, "text": l.text}
             for l in analysis.lyrics

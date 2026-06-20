@@ -77,6 +77,14 @@ class Analysis:
     motifs: list = field(default_factory=list)       # recurring loops (list[Motif])
     structure: str = ""                              # motif sequence, e.g. "A-B-A-A-C-A"
     key_changes: list = field(default_factory=list)  # modulation timeline
+    # v0.3 — deeper perception layers (populated per analyze() flags)
+    rhythm: dict = field(default_factory=dict)       # madmom beats/downbeats/tempo + bar grid
+    chords: dict = field(default_factory=dict)       # chord timeline + progression
+    loudness: dict = field(default_factory=dict)     # LUFS + crest factor
+    clap_tags: list = field(default_factory=list)    # zero-shot semantic tags [{tag,score}]
+    embedding: list = field(default_factory=list)    # CLAP audio embedding (the qualifier metric)
+    arrangement: dict = field(default_factory=dict)  # stem activity + in/out event timeline
+    caption: str = ""                                # Qwen2-Audio liner notes (opt-in)
     spectrogram: Optional[Image.Image] = field(default=None, repr=False)
     waveform: Optional[Image.Image] = field(default=None, repr=False)
 

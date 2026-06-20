@@ -1,6 +1,6 @@
 {
   "name": "sense-music",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Music perception for AI entities — hear BPM, key, structure, genre, mood, and lyrics in any audio file",
   "author": "Humanjava Enterprises",
   "license": "MIT",

@@ -64,6 +64,25 @@ def detect_key(y: np.ndarray, sr: int) -> KeyInfo:
     )
 
 
+def compute_loudness(y: np.ndarray, sr: int) -> dict:
+    """Integrated loudness (LUFS) + dynamic range proxy — mastering-level read.
+
+    LUFS tells us how 'squashed'/loud the master is; the crest factor (peak vs
+    RMS) is a quick dynamics proxy. Both cheap; degrade gracefully.
+    """
+    try:
+        import pyloudnorm as pyln
+        meter = pyln.Meter(sr)
+        lufs = float(meter.integrated_loudness(y))
+    except Exception:
+        lufs = None
+    rms = float(np.sqrt(np.mean(y ** 2) + 1e-12))
+    peak = float(np.max(np.abs(y)) + 1e-12)
+    crest_db = float(round(20 * np.log10(peak / rms), 1))
+    return {"lufs": float(round(lufs, 1)) if lufs is not None else None,
+            "crest_factor_db": crest_db}
+
+
 def compute_energy(y: np.ndarray, sr: int) -> list[float]:
     """Compute per-second RMS energy curve, normalized to 0-1."""
     rms = librosa.feature.rms(y=y, frame_length=sr, hop_length=sr)[0]
