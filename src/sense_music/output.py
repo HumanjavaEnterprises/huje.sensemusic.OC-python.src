@@ -40,9 +40,17 @@ def to_json(analysis: Analysis) -> dict:
             "confidence": analysis.key.confidence,
         },
         "sections": [
-            {"label": s.label, "start": s.start, "end": s.end}
+            {"label": s.label, "start": s.start, "end": s.end,
+             "motif": s.motif, "key": s.key}
             for s in analysis.sections
         ],
+        "motifs": [
+            {"label": m.label, "count": m.count,
+             "occurrences": m.occurrences, "total_seconds": m.total_seconds}
+            for m in analysis.motifs
+        ],
+        "structure": analysis.structure,
+        "key_changes": analysis.key_changes,
         "lyrics": [
             {"start": l.start, "end": l.end, "text": l.text}
             for l in analysis.lyrics

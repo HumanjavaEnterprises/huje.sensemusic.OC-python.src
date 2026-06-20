@@ -78,6 +78,12 @@ def analyze(
         # sections
         sections = detect_sections(y, sr, duration)
 
+        # loops/motifs + per-section key (modulation) timeline — the "narrative" layer
+        from sense_music.loops import detect_motifs, key_changes, structure_string
+        sections, motifs = detect_motifs(y, sr, sections)
+        structure = structure_string(sections)
+        key_change_list = key_changes(sections)
+
         # lyrics
         lyric_lines = []
         if lyrics:
@@ -94,7 +100,8 @@ def analyze(
         waveform_img = render_waveform(y, sr, sections=sections)
 
         # summary
-        summary = _generate_summary(file_info, bpm, key, sections, genre, mood, energy_curve)
+        summary = _generate_summary(file_info, bpm, key, sections, genre, mood,
+                                    energy_curve, motifs, structure, key_change_list)
 
         return Analysis(
             file_info=file_info,
@@ -107,6 +114,9 @@ def analyze(
             genre=genre,
             mood=mood,
             summary=summary,
+            motifs=motifs,
+            structure=structure,
+            key_changes=key_change_list,
             spectrogram=spectrogram_img,
             waveform=waveform_img,
         )
@@ -168,7 +178,8 @@ def _resolve_source(source: str) -> str:
     return source
 
 
-def _generate_summary(file_info, bpm, key, sections, genre, mood, energy_curve) -> str:
+def _generate_summary(file_info, bpm, key, sections, genre, mood, energy_curve,
+                      motifs=None, structure="", key_change_list=None) -> str:
     """Generate a natural language summary of the track."""
     dm, ds = divmod(int(file_info.duration), 60)
     duration_str = f"{dm}:{ds:02d}"
@@ -191,9 +202,24 @@ def _generate_summary(file_info, bpm, key, sections, genre, mood, energy_curve) 
     else:
         arc = "is brief"
 
-    return (
+    out = (
         f"A {duration_str} {genre} track in {key.key} {key.mode} at {bpm.tempo} BPM. "
         f"The mood is {mood_str}. The track {arc} and features "
         f"{len(sections)} section{'s' if len(sections) != 1 else ''} "
         f"({', '.join(unique_sections)}). "
     )
+
+    # loops / narrative
+    if motifs:
+        recurring = [m for m in motifs if m.count > 1]
+        out += f"Built from {len(motifs)} distinct loop{'s' if len(motifs) != 1 else ''}"
+        if recurring:
+            top = max(recurring, key=lambda m: m.count)
+            out += f"; loop {top.label} recurs {top.count}× (the spine)"
+        out += f". Structure: {structure}. "
+    if key_change_list:
+        out += f"{len(key_change_list)} key change{'s' if len(key_change_list) != 1 else ''} "
+        out += "(" + "; ".join(f"{kc['from']}→{kc['to']} @ {int(kc['time'])}s" for kc in key_change_list[:4])
+        out += ("; …" if len(key_change_list) > 4 else "") + "). "
+
+    return out

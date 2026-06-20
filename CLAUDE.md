@@ -18,7 +18,8 @@ NostrKey (identity) + NWC (Lightning payments) + huje.tools (hosting).
   - `analyze.py` — main entry point, URL resolution, file validation
   - `types.py` — frozen dataclasses (Analysis, Section, LyricLine, etc.)
   - `features.py` — BPM, key, energy, genre, mood detection
-  - `sections.py` — structural segmentation via self-similarity
+  - `sections.py` — structural segmentation via self-similarity + relative-energy narrative labels (intro/build/groove/peak/breakdown/bridge/outro)
+  - `loops.py` — loop/motif detection (which sections are reprises → A-B-A-C structure) + per-section key (modulation) timeline. The "narrative" layer for loop-driven composition.
   - `lyrics.py` — Whisper transcription with model allowlist
   - `spectrogram.py` — annotated mel spectrogram rendering
   - `waveform.py` — waveform visualization with section regions
