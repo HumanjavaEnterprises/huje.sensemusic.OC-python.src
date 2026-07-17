@@ -3,13 +3,14 @@
 
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import logging
 import os
 import socket
+import ssl
 import tempfile
 import urllib.parse
-import urllib.request
 
 import librosa
 import numpy as np
@@ -25,6 +26,8 @@ logger = logging.getLogger("sense_music")
 # safety limits
 MAX_DURATION = 600  # seconds (10 minutes)
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB
+MAX_REDIRECTS = 5
+FETCH_TIMEOUT = 30  # seconds (connect + per-read)
 ALLOWED_EXTENSIONS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"}
 
 
@@ -132,19 +135,6 @@ def _resolve_source(source: str) -> str:
     if source.startswith(("http://", "https://")):
         parsed = urllib.parse.urlparse(source)
 
-        # block non-http(s) schemes
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
-
-        # resolve hostname and block private/loopback/link-local IPs
-        hostname = parsed.hostname
-        if not hostname:
-            raise ValueError("URL has no hostname")
-        for info in socket.getaddrinfo(hostname, parsed.port or 443):
-            addr = ipaddress.ip_address(info[4][0])
-            if addr.is_private or addr.is_loopback or addr.is_link_local:
-                raise ValueError(f"URL resolves to private/internal address")
-
         # sanitize file extension
         suffix = os.path.splitext(parsed.path)[1].lower()
         if suffix not in ALLOWED_EXTENSIONS:
@@ -153,7 +143,7 @@ def _resolve_source(source: str) -> str:
         fd, tmp_path = tempfile.mkstemp(suffix=suffix)
         try:
             os.close(fd)
-            urllib.request.urlretrieve(source, tmp_path)
+            _fetch_url(source, tmp_path)
         except Exception:
             # clean up on download failure
             if os.path.exists(tmp_path):
@@ -166,6 +156,148 @@ def _resolve_source(source: str) -> str:
         raise ValueError(f"Unsupported URI scheme: {source}")
 
     return source
+
+
+def _validate_and_pin(hostname: str, port: int) -> str:
+    """Resolve *hostname*, reject private/internal addresses, return a pinned IP.
+
+    Every resolved address is checked; the first one is returned so the caller
+    can connect to exactly the address that was validated (closing the
+    DNS-rebinding TOCTOU between check and fetch).
+    """
+    # IP literals resolve to themselves; getaddrinfo handles both cases
+    try:
+        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"Could not resolve hostname: {hostname}") from exc
+    if not infos:
+        raise ValueError(f"Could not resolve hostname: {hostname}")
+
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0])
+        # unwrap IPv4-mapped IPv6 (::ffff:127.0.0.1) before checking
+        mapped = getattr(addr, "ipv4_mapped", None)
+        if mapped is not None:
+            addr = mapped
+        if (
+            addr.is_private
+            or addr.is_loopback
+            or addr.is_link_local
+            or addr.is_reserved
+            or addr.is_multicast
+            or addr.is_unspecified
+        ):
+            raise ValueError("URL resolves to private/internal address")
+
+    return infos[0][4][0]
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """HTTP connection that connects to a pre-validated IP.
+
+    The Host header is still derived from the original hostname (passed to the
+    constructor), but the TCP connection goes to the pinned IP — so the address
+    that was security-checked is exactly the address we fetch from.
+    """
+
+    def __init__(self, host, port, pinned_ip, timeout):
+        super().__init__(host, port, timeout=timeout)
+        self._pinned_ip = pinned_ip
+
+    def connect(self):
+        self.sock = socket.create_connection(
+            (self._pinned_ip, self.port), timeout=self.timeout
+        )
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS connection pinned to a pre-validated IP with proper SNI/cert checks."""
+
+    def __init__(self, host, port, pinned_ip, timeout):
+        super().__init__(host, port, timeout=timeout, context=ssl.create_default_context())
+        self._pinned_ip = pinned_ip
+
+    def connect(self):
+        sock = socket.create_connection(
+            (self._pinned_ip, self.port), timeout=self.timeout
+        )
+        # SNI + certificate verification against the original hostname
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def _fetch_url(
+    url: str,
+    dest_path: str,
+    *,
+    max_redirects: int = MAX_REDIRECTS,
+    max_bytes: int = MAX_FILE_SIZE,
+    timeout: float = FETCH_TIMEOUT,
+) -> None:
+    """Download *url* to *dest_path* with SSRF protection on every redirect hop.
+
+    - The private/loopback/link-local/reserved check runs on every hop, and the
+      connection is made to the exact IP that passed the check (DNS pinning).
+    - Redirects are followed manually (never automatically) and capped.
+    - The body is streamed with a hard size cap.
+    """
+    for _hop in range(max_redirects + 1):
+        parsed = urllib.parse.urlparse(url)
+
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("URL has no hostname")
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+        pinned_ip = _validate_and_pin(hostname, port)
+
+        conn_cls = (
+            _PinnedHTTPSConnection if parsed.scheme == "https" else _PinnedHTTPConnection
+        )
+        conn = conn_cls(hostname, port, pinned_ip, timeout)
+        try:
+            request_path = parsed.path or "/"
+            if parsed.query:
+                request_path += "?" + parsed.query
+            conn.request("GET", request_path, headers={"User-Agent": "sense-music"})
+            response = conn.getresponse()
+
+            if response.status in (301, 302, 303, 307, 308):
+                location = response.getheader("Location")
+                if not location:
+                    raise ValueError("Redirect response without Location header")
+                url = urllib.parse.urljoin(url, location)
+                continue  # next hop is re-validated at the top of the loop
+
+            if response.status != 200:
+                raise ValueError(f"Download failed: HTTP {response.status}")
+
+            content_length = response.getheader("Content-Length")
+            if content_length is not None and content_length.isdigit():
+                if int(content_length) > max_bytes:
+                    raise ValueError(
+                        f"Download too large: {content_length} bytes (max {max_bytes})"
+                    )
+
+            written = 0
+            with open(dest_path, "wb") as fh:
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise ValueError(
+                            f"Download too large: exceeded {max_bytes} bytes"
+                        )
+                    fh.write(chunk)
+            return
+        finally:
+            conn.close()
+
+    raise ValueError(f"Too many redirects (max {max_redirects})")
 
 
 def _generate_summary(file_info, bpm, key, sections, genre, mood, energy_curve) -> str:
