@@ -122,7 +122,7 @@ def analyze(
 def _validate_file(path: str) -> None:
     """Validate file exists, is a regular file, and is within size limits."""
     if not os.path.isfile(path):
-        raise ValueError(f"Not a file: {path}")
+        raise ValueError(f"Not a file: {os.path.basename(path)}")
     size = os.path.getsize(path)
     if size == 0:
         raise ValueError("Empty file")
@@ -151,9 +151,10 @@ def _resolve_source(source: str) -> str:
             raise
         return tmp_path
 
-    # block non-http URI schemes (file://, ftp://, etc.)
+    # block non-http URI schemes (file://, ftp://, etc.) — leak only the scheme
     if "://" in source:
-        raise ValueError(f"Unsupported URI scheme: {source}")
+        scheme = source.split("://", 1)[0]
+        raise ValueError(f"Unsupported URI scheme: {scheme}")
 
     return source
 

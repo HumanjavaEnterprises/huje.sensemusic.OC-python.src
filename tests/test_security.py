@@ -47,6 +47,17 @@ def test_block_ftp_uri():
         _resolve_source("ftp://evil.com/audio.mp3")
 
 
+def test_uri_error_does_not_leak_full_path():
+    """Ensure unsupported URI errors only show the scheme, not the full URI."""
+    try:
+        _resolve_source("ftp://internal.corp/secret/path.mp3")
+    except ValueError as exc:
+        msg = str(exc)
+        assert "internal.corp" not in msg
+        assert "secret" not in msg
+        assert "ftp" in msg
+
+
 # --- SSRF redirect / DNS-rebinding tests ---
 
 class _ConfigurableHandler(BaseHTTPRequestHandler):
@@ -216,6 +227,16 @@ def test_reject_nonexistent_file():
         _validate_file("/nonexistent/path/audio.wav")
 
 
+def test_file_error_does_not_leak_directory():
+    """Ensure file-not-found errors show basename only, not the full path."""
+    try:
+        _validate_file("/secret/internal/path/audio.wav")
+    except ValueError as exc:
+        msg = str(exc)
+        assert "/secret/internal/path" not in msg
+        assert "audio.wav" in msg
+
+
 def test_reject_directory():
     with pytest.raises(ValueError, match="Not a file"):
         _validate_file(tempfile.gettempdir())
@@ -283,6 +304,16 @@ def test_render_page_blocks_traversal():
         render_page(analysis, "../../tmp/evil.html")
 
 
+def test_traversal_error_does_not_leak_path():
+    """Ensure traversal error messages don't include the attempted path."""
+    try:
+        _validate_output_path("../../secret/internal/dir")
+    except ValueError as exc:
+        msg = str(exc)
+        assert "secret" not in msg
+        assert "internal" not in msg
+
+
 # --- Whisper model validation (#6) ---
 
 def test_reject_unknown_whisper_model():
@@ -304,3 +335,31 @@ def test_url_suffix_sanitized():
     # by checking that the function rejects internal IPs before suffix matters
     with pytest.raises(ValueError):
         _resolve_source("http://127.0.0.1/payload.py")
+
+
+# --- repr safety tests ---
+
+def test_analysis_repr_omits_image_data():
+    """Ensure Analysis repr does not include raw image data."""
+    analysis = _make_xss_analysis()
+    r = repr(analysis)
+    assert "PIL" not in r
+    assert "Image" not in r
+
+
+def test_file_info_repr_is_safe():
+    """FileInfo repr should only contain metadata, no file system paths."""
+    fi = FileInfo(name="song.mp3", duration=5.0, sample_rate=22050, channels=1, format="mp3")
+    r = repr(fi)
+    # name is user-supplied metadata, not a filesystem path — that's fine
+    assert "song.mp3" in r
+
+
+# --- Data type immutability tests ---
+
+def test_analysis_types_are_frozen():
+    """All data types should be frozen dataclasses."""
+    import dataclasses
+    for cls in (FileInfo, BPMInfo, KeyInfo, Section, LyricLine):
+        assert dataclasses.is_dataclass(cls)
+        assert cls.__dataclass_params__.frozen

@@ -10,7 +10,7 @@ Built by [humanjava.com](https://humanjava.com) — find this and other tools fo
 pip install sense-music
 ```
 
-> **v0.1.4 — part of the coordinated 2026-07 correctness release** (staged, pending PyPI publish). Audited alongside the whole Nostr library family. This release hardens `analyze()` URL fetching against SSRF via redirects and DNS-rebinding (per-hop address checks, DNS pinning, redirect cap, streamed size cap). See [`CHANGELOG.md`](./CHANGELOG.md).
+> **v0.1.6 — coordinated 2026-07 correctness release** (version-drift reconciliation, staged pending PyPI publish). Converges the repo with PyPI 0.1.5: keeps the SSRF redirect + DNS-rebinding hardening of `analyze()` URL fetching (per-hop address checks, DNS pinning, redirect cap, streamed size cap) and folds in 0.1.5's error-message info-disclosure hardening (no path/URI leaks in errors). See [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Quick Start
 

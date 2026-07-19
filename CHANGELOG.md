@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.1.6 — 2026-07-19
+
+Version-drift reconciliation. PyPI 0.1.5 was published from a branch that
+carried error-message info-disclosure hardening but *not* the SSRF
+redirect/DNS-rebinding fix that landed locally as 0.1.4. This release merges
+both lines of work (superseding both 0.1.4 and 0.1.5) so the published package
+and the repo converge.
+
+### Security
+
+- Preserved the full SSRF redirect + DNS-rebinding TOCTOU fix from 0.1.4
+  (per-hop address checks, DNS pinning, redirect cap, streamed size cap).
+- Merged the info-disclosure hardening from 0.1.5: error messages no longer
+  leak filesystem paths or full URIs — `_validate_file` reports only the
+  basename, unsupported-scheme errors report only the scheme, and the path
+  traversal error no longer echoes the attempted path.
+
+### Dependencies
+
+- Pinned minimum versions carried over from 0.1.5: `numpy>=1.24`,
+  `openai-whisper>=20231117`.
+
+### Tests
+
+- Merged 0.1.5's tests on top of 0.1.4's redirect/rebinding suite:
+  error-message path-leak assertions, `repr` safety, and frozen-dataclass
+  immutability checks.
+
+## 0.1.5 — PyPI only (superseded)
+
+- Published to PyPI from a parallel branch. Added error-message
+  info-disclosure hardening, `repr`/immutability tests, and dependency version
+  pins, but did **not** include the SSRF redirect/DNS-rebinding fix. Folded
+  into 0.1.6.
+
 ## 0.1.4 — 2026-07-17
 
 ### Security
