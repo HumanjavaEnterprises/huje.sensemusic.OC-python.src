@@ -190,4 +190,4 @@ def _validate_output_path(path: str) -> None:
     resolved = os.path.realpath(path)
     # block if the path contains .. traversal that escapes the intended directory
     if ".." in os.path.normpath(path).split(os.sep):
-        raise ValueError(f"Path traversal not allowed: {path}")
+        raise ValueError("Path traversal not allowed")

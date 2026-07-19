@@ -3,14 +3,21 @@
 
 import os
 import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 from PIL import Image
 
-from sense_music.analyze import _resolve_source, _validate_file, analyze
-from sense_music.output import to_html, save, render_page, _validate_output_path
+import importlib
+
+from sense_music.analyze import _fetch_url, _resolve_source, _validate_file
+from sense_music.output import to_html, render_page, _validate_output_path
 from sense_music.lyrics import ALLOWED_MODELS
 from sense_music.types import Analysis, FileInfo, BPMInfo, KeyInfo, Section, LyricLine
+
+# the package re-exports the analyze() function, which shadows the submodule name
+analyze_mod = importlib.import_module("sense_music.analyze")
 
 
 # --- SSRF tests (#1) ---
@@ -40,6 +47,169 @@ def test_block_ftp_uri():
         _resolve_source("ftp://evil.com/audio.mp3")
 
 
+def test_uri_error_does_not_leak_full_path():
+    """Ensure unsupported URI errors only show the scheme, not the full URI."""
+    try:
+        _resolve_source("ftp://internal.corp/secret/path.mp3")
+    except ValueError as exc:
+        msg = str(exc)
+        assert "internal.corp" not in msg
+        assert "secret" not in msg
+        assert "ftp" in msg
+
+
+# --- SSRF redirect / DNS-rebinding tests ---
+
+class _ConfigurableHandler(BaseHTTPRequestHandler):
+    """Serves responses from server.app_responses: path -> (status, headers, body)."""
+
+    def do_GET(self):
+        status, headers, body = self.server.app_responses.get(
+            self.path, (404, {}, b"not found")
+        )
+        headers = dict(headers)
+        omit_length = headers.pop("X-Test-Omit-Content-Length", None) is not None
+        self.send_response(status)
+        for key, value in headers.items():
+            self.send_header(key, value)
+        if body and "Content-Length" not in headers and not omit_length:
+            self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def log_message(self, *args):  # silence test output
+        pass
+
+
+@pytest.fixture
+def http_server():
+    server = HTTPServer(("127.0.0.1", 0), _ConfigurableHandler)
+    server.app_responses = {}
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server
+    server.shutdown()
+    thread.join(timeout=5)
+
+
+@pytest.fixture
+def allow_test_server(monkeypatch):
+    """Let 127.0.0.1 (the pytest fixture server) through the SSRF check.
+
+    All other hostnames/IPs — including redirect targets — still go through
+    the real _validate_and_pin, so the per-hop check is genuinely exercised.
+    """
+    real = analyze_mod._validate_and_pin
+
+    def patched(hostname, port):
+        if hostname == "127.0.0.1":
+            return "127.0.0.1"
+        return real(hostname, port)
+
+    monkeypatch.setattr(analyze_mod, "_validate_and_pin", patched)
+
+
+def _url(server, path):
+    return f"http://127.0.0.1:{server.server_address[1]}{path}"
+
+
+def test_redirect_to_metadata_ip_blocked(http_server, allow_test_server, tmp_path):
+    """A 302 to the cloud metadata IP must be blocked at the redirect hop."""
+    http_server.app_responses["/track.mp3"] = (
+        302,
+        {"Location": "http://169.254.169.254/latest/meta-data/"},
+        b"",
+    )
+    with pytest.raises(ValueError, match="private/internal"):
+        _fetch_url(_url(http_server, "/track.mp3"), str(tmp_path / "out.mp3"))
+
+
+def test_redirect_to_private_ip_blocked(http_server, allow_test_server, tmp_path):
+    """A 302 to a private-range IP must be blocked at the redirect hop."""
+    http_server.app_responses["/track.mp3"] = (
+        302,
+        {"Location": "http://10.0.0.1/internal.mp3"},
+        b"",
+    )
+    with pytest.raises(ValueError, match="private/internal"):
+        _fetch_url(_url(http_server, "/track.mp3"), str(tmp_path / "out.mp3"))
+
+
+def test_redirect_to_file_scheme_blocked(http_server, allow_test_server, tmp_path):
+    """A 302 to a file:// URL must be rejected."""
+    http_server.app_responses["/track.mp3"] = (
+        302,
+        {"Location": "file:///etc/passwd"},
+        b"",
+    )
+    with pytest.raises(ValueError, match="Unsupported URL scheme"):
+        _fetch_url(_url(http_server, "/track.mp3"), str(tmp_path / "out.mp3"))
+
+
+def test_redirect_loop_capped(http_server, allow_test_server, tmp_path):
+    """Endless self-redirects must hit the max-redirect cap."""
+    http_server.app_responses["/loop.mp3"] = (
+        302,
+        {"Location": "/loop.mp3"},
+        b"",
+    )
+    with pytest.raises(ValueError, match="Too many redirects"):
+        _fetch_url(_url(http_server, "/loop.mp3"), str(tmp_path / "out.mp3"))
+
+
+def test_oversized_body_rejected(http_server, allow_test_server, tmp_path):
+    """A streamed body over the cap must be rejected mid-download."""
+    body = b"x" * (64 * 1024)
+    # omit Content-Length so the cap must be enforced while streaming
+    http_server.app_responses["/big.mp3"] = (
+        200,
+        {"X-Test-Omit-Content-Length": "1"},
+        body,
+    )
+    with pytest.raises(ValueError, match="too large"):
+        _fetch_url(
+            _url(http_server, "/big.mp3"),
+            str(tmp_path / "out.mp3"),
+            max_bytes=1024,
+        )
+
+
+def test_oversized_content_length_rejected(http_server, allow_test_server, tmp_path):
+    """A Content-Length over the cap is rejected before streaming."""
+    http_server.app_responses["/big.mp3"] = (
+        200,
+        {"Content-Length": str(10**9)},
+        b"",
+    )
+    with pytest.raises(ValueError, match="too large"):
+        _fetch_url(
+            _url(http_server, "/big.mp3"),
+            str(tmp_path / "out.mp3"),
+            max_bytes=1024,
+        )
+
+
+def test_fetch_success_after_public_redirect(http_server, allow_test_server, tmp_path):
+    """Normal fetch (including a same-host redirect) still works and pins the IP."""
+    payload = b"ID3 fake mp3 payload"
+    http_server.app_responses["/moved.mp3"] = (
+        302,
+        {"Location": "/track.mp3"},
+        b"",
+    )
+    http_server.app_responses["/track.mp3"] = (200, {}, payload)
+    dest = tmp_path / "out.mp3"
+    _fetch_url(_url(http_server, "/moved.mp3"), str(dest))
+    assert dest.read_bytes() == payload
+
+
+def test_unresolvable_hostname_raises_valueerror():
+    """socket.gaierror is normalized to ValueError."""
+    with pytest.raises(ValueError, match="Could not resolve"):
+        _resolve_source("http://nonexistent-host.sense-music.invalid/track.mp3")
+
+
 # --- File validation tests (#2, #10) ---
 
 def test_reject_empty_file():
@@ -55,6 +225,16 @@ def test_reject_empty_file():
 def test_reject_nonexistent_file():
     with pytest.raises(ValueError, match="Not a file"):
         _validate_file("/nonexistent/path/audio.wav")
+
+
+def test_file_error_does_not_leak_directory():
+    """Ensure file-not-found errors show basename only, not the full path."""
+    try:
+        _validate_file("/secret/internal/path/audio.wav")
+    except ValueError as exc:
+        msg = str(exc)
+        assert "/secret/internal/path" not in msg
+        assert "audio.wav" in msg
 
 
 def test_reject_directory():
@@ -124,6 +304,16 @@ def test_render_page_blocks_traversal():
         render_page(analysis, "../../tmp/evil.html")
 
 
+def test_traversal_error_does_not_leak_path():
+    """Ensure traversal error messages don't include the attempted path."""
+    try:
+        _validate_output_path("../../secret/internal/dir")
+    except ValueError as exc:
+        msg = str(exc)
+        assert "secret" not in msg
+        assert "internal" not in msg
+
+
 # --- Whisper model validation (#6) ---
 
 def test_reject_unknown_whisper_model():
@@ -145,3 +335,31 @@ def test_url_suffix_sanitized():
     # by checking that the function rejects internal IPs before suffix matters
     with pytest.raises(ValueError):
         _resolve_source("http://127.0.0.1/payload.py")
+
+
+# --- repr safety tests ---
+
+def test_analysis_repr_omits_image_data():
+    """Ensure Analysis repr does not include raw image data."""
+    analysis = _make_xss_analysis()
+    r = repr(analysis)
+    assert "PIL" not in r
+    assert "Image" not in r
+
+
+def test_file_info_repr_is_safe():
+    """FileInfo repr should only contain metadata, no file system paths."""
+    fi = FileInfo(name="song.mp3", duration=5.0, sample_rate=22050, channels=1, format="mp3")
+    r = repr(fi)
+    # name is user-supplied metadata, not a filesystem path — that's fine
+    assert "song.mp3" in r
+
+
+# --- Data type immutability tests ---
+
+def test_analysis_types_are_frozen():
+    """All data types should be frozen dataclasses."""
+    import dataclasses
+    for cls in (FileInfo, BPMInfo, KeyInfo, Section, LyricLine):
+        assert dataclasses.is_dataclass(cls)
+        assert cls.__dataclass_params__.frozen

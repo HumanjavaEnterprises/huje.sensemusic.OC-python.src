@@ -11,7 +11,7 @@ NostrKey (identity) + NWC (Lightning payments) + huje.tools (hosting).
 - `pytest -v` — run all tests (51 tests, including 18 security tests)
 - `python -m build` — build wheel
 - `twine upload dist/*` — publish to PyPI (needs API token)
-- `clawhub publish clawhub/ --slug sense-music --name "sense-music" --version X.Y.Z` — publish to ClawHub
+- `npx clawhub publish ./clawhub --slug sense-music --name "sense-music" --version X.Y.Z --tags latest --changelog "..."` — publish to ClawHub (npm CLI, not Python)
 
 ## Structure
 - `src/sense_music/` — package source
@@ -31,6 +31,9 @@ NostrKey (identity) + NWC (Lightning payments) + huje.tools (hosting).
 Hardened in v0.1.1 against: SSRF (private IP blocklist), XSS (html.escape on all output),
 OOM (duration cap, file size limit, chroma subsampling), path traversal (.. blocked),
 whisper model allowlist, matplotlib figure leak protection.
+v0.1.4 (coordinated 2026-07 correctness release, staged/pending publish) extends the SSRF
+guard to redirects and DNS rebinding: per-hop address checks, DNS pinning to the vetted IP,
+manual redirect following capped at 5 hops, and a streamed body size cap.
 
 ## Conventions
 - Vanilla Python, no async
