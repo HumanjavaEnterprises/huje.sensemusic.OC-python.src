@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sense-music"
-version = "0.1.6"
+version = "0.3.1"
 description = "Turn audio into structured analysis and annotated visualizations for AI perception"
 readme = "README.md"
 license = "MIT"
@@ -33,6 +33,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "build", "twine"]
+# deeper perception layers (v0.3) — each capability degrades gracefully if absent
+loudness = ["pyloudnorm>=0.1"]                        # LUFS + dynamics
+embedding = ["transformers>=4.40", "torch>=2.0"]      # CLAP tags + embedding (qualifier metric)
+rhythm = ["madmom>=0.16"]                             # beat/downbeat (bar grid); CNN chords
+stems = ["demucs>=4.0", "torchaudio>=2.0"]            # source separation -> arrangement
+caption = ["transformers>=4.40", "torch>=2.0"]        # Qwen2-Audio liner notes
+# everything (note: madmom on py3.12 wants a recent git build; see CLAUDE.md)
+full = ["pyloudnorm>=0.1", "transformers>=4.40", "torch>=2.0", "torchaudio>=2.0",
+        "demucs>=4.0", "madmom>=0.16"]
 
 [project.urls]
 Homepage = "https://huje.tools"

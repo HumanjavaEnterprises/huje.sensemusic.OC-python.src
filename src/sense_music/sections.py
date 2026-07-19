@@ -63,41 +63,55 @@ def detect_sections(y: np.ndarray, sr: int, duration: float) -> list[Section]:
             boundary_times.append(round(t, 1))
     boundary_times.append(round(duration, 1))
 
-    # assign labels based on position and spectral characteristics
-    sections = []
-    n = len(boundary_times) - 1
-    for i in range(n):
-        start = boundary_times[i]
-        end = boundary_times[i + 1]
-        label = _assign_label(i, n, y, sr, start, end)
-        sections.append(Section(label=label, start=start, end=end))
+    # assign labels using RELATIVE energy across this track's own sections, so a
+    # steady loop-driven piece still gets a real narrative arc (not all "verse").
+    boundaries = [(boundary_times[i], boundary_times[i + 1]) for i in range(len(boundary_times) - 1)]
+    labels = _label_sections(y, sr, boundaries)
+    sections = [Section(label=lab, start=s, end=e) for (s, e), lab in zip(boundaries, labels)]
 
     return sections if sections else [Section(label="intro", start=0.0, end=round(duration, 1))]
 
 
-def _assign_label(index: int, total: int, y: np.ndarray, sr: int,
-                  start: float, end: float) -> str:
-    """Assign a section label based on position and energy."""
-    # extract segment audio
-    start_sample = int(start * sr)
-    end_sample = min(int(end * sr), len(y))
-    segment = y[start_sample:end_sample]
+def _label_sections(y: np.ndarray, sr: int, boundaries: list[tuple[float, float]]) -> list[str]:
+    """Label sections by their energy RANK within this track + position + rise/fall.
 
-    if len(segment) == 0:
-        return "instrumental"
+    Absolute RMS thresholds collapse loop tracks (consistent energy) to all-"verse".
+    Ranking each section against the track's own distribution recovers the arc:
+    intro / build / groove / peak / breakdown / bridge / outro.
+    """
+    n = len(boundaries)
+    if n == 0:
+        return []
+    rms = []
+    for s, e in boundaries:
+        seg = y[int(s * sr):min(int(e * sr), len(y))]
+        rms.append(float(np.sqrt(np.mean(seg ** 2))) if len(seg) else 0.0)
+    arr = np.array(rms)
+    # percentile rank of each section's energy within the track
+    order = arr.argsort()
+    pct = np.empty(n)
+    pct[order] = np.linspace(0, 1, n) if n > 1 else np.array([0.5])
 
-    rms = float(np.sqrt(np.mean(segment ** 2)))
-    overall_rms = float(np.sqrt(np.mean(y ** 2)))
-
-    # position-based heuristics
-    if index == 0 and (end - start) < 20:
-        return "intro"
-    if index == total - 1 and (end - start) < 20:
-        return "outro"
-
-    # energy-based
-    if rms > overall_rms * 1.2:
-        return "chorus"
-    if rms < overall_rms * 0.5:
-        return "bridge"
-    return "verse"
+    labels = []
+    for i in range(n):
+        s, e = boundaries[i]
+        dur = e - s
+        if i == 0:
+            labels.append("intro")
+            continue
+        if i == n - 1:
+            labels.append("outro")
+            continue
+        rose = arr[i] > arr[i - 1] * 1.15
+        fell = arr[i] < arr[i - 1] * 0.85
+        if pct[i] >= 0.80:
+            labels.append("peak")
+        elif pct[i] <= 0.20:
+            labels.append("breakdown" if dur < 12 else "bridge")
+        elif rose:
+            labels.append("build")
+        elif fell:
+            labels.append("breakdown")
+        else:
+            labels.append("groove")
+    return labels

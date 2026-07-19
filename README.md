@@ -7,10 +7,17 @@ Built by [humanjava.com](https://humanjava.com) — find this and other tools fo
 ## Install
 
 ```bash
-pip install sense-music
+pip install sense-music              # core: sections, loops, key, energy, spectrogram, lyrics
+pip install "sense-music[full]"      # + deep perception (CLAP, madmom, Demucs, Qwen2-Audio)
 ```
 
-> **v0.1.6 — coordinated 2026-07 correctness release** (version-drift reconciliation, staged pending PyPI publish). Converges the repo with PyPI 0.1.5: keeps the SSRF redirect + DNS-rebinding hardening of `analyze()` URL fetching (per-hop address checks, DNS pinning, redirect cap, streamed size cap) and folds in 0.1.5's error-message info-disclosure hardening (no path/URI leaks in errors). See [`CHANGELOG.md`](./CHANGELOG.md).
+Deep-perception layers are optional extras (`embedding`, `rhythm`, `stems`, `caption`, `loudness`) —
+each degrades gracefully if its dependency is absent. ⚠️ On Python 3.12, `madmom` needs the git build
+(`pip install git+https://github.com/CPJKU/madmom.git`); the PyPI 0.16.1 won't build on 3.12.
+
+> **Security:** `analyze()` URL fetching is hardened against SSRF via redirects and DNS
+> rebinding — per-hop address checks, DNS pinning to the vetted IP, a 5-hop redirect cap, and a
+> streamed body size cap. See [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Quick Start
 
@@ -68,13 +75,45 @@ result = analyze("song.mp3", lyrics=False)
 | `result.genre` | Simple genre classification |
 | `result.mood` | List of mood descriptors |
 | `result.summary` | Natural language track description |
+| `result.motifs` | Recurring LOOPS (Motif label, count, occurrences) — which sections reprise |
+| `result.structure` | Motif sequence, e.g. `"A-B-A-A-C-A"` |
+| `result.key_changes` | Modulation timeline (per-section key changes) |
+| `result.rhythm` | madmom beats/**downbeats**/tempo + bar grid (`rhythm=True`) |
+| `result.chords` | Chord progression + timeline (`chords=True`) |
+| `result.loudness` | LUFS + crest factor |
+| `result.clap_tags` | CLAP zero-shot semantic tags (`clap_tags=True`) |
+| `result.embedding` | CLAP 512-d audio embedding — a similarity metric ("does this sound like X") (`embedding=True`) |
+| `result.arrangement` | Demucs stem activity + element in/out timeline (`stems=True`) |
+| `result.caption` | Qwen2-Audio free-text liner notes (`caption=True`) |
+
+## Deep perception (v0.3)
+
+Each layer is an `analyze()` flag, fail-soft if its dep is missing:
+
+```python
+result = analyze("song.mp3", rhythm=True, embedding=True, clap_tags=True,
+                 chords=True, stems=True, caption=False)
+```
+
+- **rhythm** (madmom) — SOTA beat/**downbeat** tracking → the BAR grid (the thing video editors cut on).
+- **embedding + clap_tags** (CLAP) — a 512-d audio embedding (the similarity metric) + zero-shot tags.
+- **stems** (Demucs) — source separation → an arrangement timeline (which element enters/exits when).
+- **chords** (madmom) — chord-progression recognition.
+- **caption** (Qwen2-Audio) — natural-language "liner notes" (heavy; loads a 7B model).
+
+### Cut grid (for video editing)
+
+```python
+from sense_music.cutgrid import edit_points, match_reference
+pts = edit_points(result, snap=True)             # bar-aligned, ranked edit points
+hits = match_reference([4.1, 8.0, 12.2], result) # what song event each reference cut lands on
+```
 
 ## Dependencies
 
-- [librosa](https://librosa.org/) — audio analysis
-- [matplotlib](https://matplotlib.org/) — visualization
-- [Pillow](https://pillow.readthedocs.io/) — image handling
-- [openai-whisper](https://github.com/openai/whisper) — lyrics transcription (optional via `lyrics=False`)
+- [librosa](https://librosa.org/) — audio analysis · [matplotlib](https://matplotlib.org/) — visualization · [Pillow](https://pillow.readthedocs.io/) — image handling
+- [openai-whisper](https://github.com/openai/whisper) — lyrics (optional via `lyrics=False`)
+- **Deep-perception extras:** [transformers](https://github.com/huggingface/transformers) (CLAP + Qwen2-Audio), [madmom](https://github.com/CPJKU/madmom) (beat/downbeat/chords), [demucs](https://github.com/adefossez/demucs) (stems), [pyloudnorm](https://github.com/csteinmetz1/pyloudnorm) (LUFS)
 
 ## Usage & Copyright
 

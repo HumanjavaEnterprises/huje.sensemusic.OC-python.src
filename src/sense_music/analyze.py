@@ -16,7 +16,8 @@ import librosa
 import numpy as np
 
 from sense_music.types import Analysis, FileInfo
-from sense_music.features import detect_bpm, detect_key, compute_energy, classify_genre, classify_mood
+from sense_music.features import (detect_bpm, detect_key, compute_energy, classify_genre,
+                                  classify_mood, compute_loudness)
 from sense_music.sections import detect_sections
 from sense_music.spectrogram import render_spectrogram
 from sense_music.waveform import render_waveform
@@ -37,14 +38,28 @@ def analyze(
     lyrics: bool = True,
     whisper_model: str = "base",
     max_duration: float = MAX_DURATION,
+    rhythm: bool = True,
+    embedding: bool = True,
+    clap_tags: bool = True,
+    chords: bool = False,
+    stems: bool = False,
+    caption: bool = False,
+    device: str = "cuda",
 ) -> Analysis:
     """Analyze an audio file and return a complete Analysis.
 
     Args:
         source: File path or URL to an audio file.
-        lyrics: Whether to transcribe lyrics with Whisper (default True).
+        lyrics: Transcribe lyrics with Whisper (default True).
         whisper_model: Whisper model size (default "base").
         max_duration: Maximum audio duration in seconds (default 600).
+        rhythm: madmom beat/downbeat/tempo + bar grid (default True; librosa fallback).
+        embedding: CLAP audio embedding — the qualifier's similarity metric (default True).
+        clap_tags: CLAP zero-shot semantic tags (default True).
+        chords: chord-progression recognition (default False; madmom, heavier).
+        stems: Demucs stem separation -> arrangement timeline (default False; ~10-30s/track).
+        caption: Qwen2-Audio free-text liner notes (default False; loads a 7B model).
+        device: torch device for the ML models (default "cuda").
 
     Returns:
         An Analysis object with all structured data and visualizations.
@@ -77,9 +92,63 @@ def analyze(
         energy_curve = compute_energy(y, sr)
         genre = classify_genre(y, sr)
         mood = classify_mood(y, sr)
+        loudness = compute_loudness(y, sr)
 
         # sections
         sections = detect_sections(y, sr, duration)
+
+        # loops/motifs + per-section key (modulation) timeline — the "narrative" layer
+        from sense_music.loops import detect_motifs, key_changes, structure_string
+        sections, motifs = detect_motifs(y, sr, sections)
+        structure = structure_string(sections)
+        key_change_list = key_changes(sections)
+
+        # ── v0.3 deeper perception layers (each gated + fail-soft) ──
+        rhythm_info = {}
+        if rhythm:
+            try:
+                from sense_music.rhythm import analyze_rhythm
+                rhythm_info = analyze_rhythm(audio_path, y, sr)
+            except Exception as exc:
+                logger.warning("Rhythm analysis failed: %s", exc)
+
+        chord_info = {}
+        if chords:
+            try:
+                from sense_music.chords import analyze_chords
+                chord_info = analyze_chords(audio_path, y, sr)
+            except Exception as exc:
+                logger.warning("Chord analysis failed: %s", exc)
+
+        clap_tag_list, embed = [], []
+        if clap_tags or embedding:
+            try:
+                from sense_music import embedding as _emb
+                if embedding:
+                    embed = _emb.embed_audio(y, sr, device=device)
+                if clap_tags:
+                    clap_tag_list = _emb.zero_shot_tags(y, sr, device=device)
+            except Exception as exc:
+                logger.warning("CLAP analysis failed: %s", exc)
+
+        arrangement = {}
+        if stems:
+            try:
+                from sense_music.stems import separate, stem_activity, arrangement_events
+                stem_audio, stem_sr = separate(audio_path, device=device)
+                activity = stem_activity(stem_audio, stem_sr)
+                arrangement = {"activity": activity,
+                               "events": arrangement_events(activity)}
+            except Exception as exc:
+                logger.warning("Stem separation failed: %s", exc)
+
+        caption_text = ""
+        if caption:
+            try:
+                from sense_music.caption import caption_audio
+                caption_text = caption_audio(y, sr, device=device)
+            except Exception as exc:
+                logger.warning("Captioning failed: %s", exc)
 
         # lyrics
         lyric_lines = []
@@ -97,7 +166,8 @@ def analyze(
         waveform_img = render_waveform(y, sr, sections=sections)
 
         # summary
-        summary = _generate_summary(file_info, bpm, key, sections, genre, mood, energy_curve)
+        summary = _generate_summary(file_info, bpm, key, sections, genre, mood,
+                                    energy_curve, motifs, structure, key_change_list)
 
         return Analysis(
             file_info=file_info,
@@ -110,6 +180,16 @@ def analyze(
             genre=genre,
             mood=mood,
             summary=summary,
+            motifs=motifs,
+            structure=structure,
+            key_changes=key_change_list,
+            rhythm=rhythm_info,
+            chords=chord_info,
+            loudness=loudness,
+            clap_tags=clap_tag_list,
+            embedding=embed,
+            arrangement=arrangement,
+            caption=caption_text,
             spectrogram=spectrogram_img,
             waveform=waveform_img,
         )
@@ -301,7 +381,8 @@ def _fetch_url(
     raise ValueError(f"Too many redirects (max {max_redirects})")
 
 
-def _generate_summary(file_info, bpm, key, sections, genre, mood, energy_curve) -> str:
+def _generate_summary(file_info, bpm, key, sections, genre, mood, energy_curve,
+                      motifs=None, structure="", key_change_list=None) -> str:
     """Generate a natural language summary of the track."""
     dm, ds = divmod(int(file_info.duration), 60)
     duration_str = f"{dm}:{ds:02d}"
@@ -324,9 +405,24 @@ def _generate_summary(file_info, bpm, key, sections, genre, mood, energy_curve) 
     else:
         arc = "is brief"
 
-    return (
+    out = (
         f"A {duration_str} {genre} track in {key.key} {key.mode} at {bpm.tempo} BPM. "
         f"The mood is {mood_str}. The track {arc} and features "
         f"{len(sections)} section{'s' if len(sections) != 1 else ''} "
         f"({', '.join(unique_sections)}). "
     )
+
+    # loops / narrative
+    if motifs:
+        recurring = [m for m in motifs if m.count > 1]
+        out += f"Built from {len(motifs)} distinct loop{'s' if len(motifs) != 1 else ''}"
+        if recurring:
+            top = max(recurring, key=lambda m: m.count)
+            out += f"; loop {top.label} recurs {top.count}× (the spine)"
+        out += f". Structure: {structure}. "
+    if key_change_list:
+        out += f"{len(key_change_list)} key change{'s' if len(key_change_list) != 1 else ''} "
+        out += "(" + "; ".join(f"{kc['from']}→{kc['to']} @ {int(kc['time'])}s" for kc in key_change_list[:4])
+        out += ("; …" if len(key_change_list) > 4 else "") + "). "
+
+    return out

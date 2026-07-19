@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.1 — 2026-07-19
+
+Reconciliation release. Two lines of work had diverged: the deep-perception
+feature train (v0.2.0 loop/motif + key timeline, v0.3.0 stems/CLAP/madmom/
+chords/loudness/caption + cut grid) and the SSRF security hardening that was
+published to PyPI as 0.1.x. This release merges both so the repo and the
+published package carry the full feature set **and** the security fix.
+
+### Added
+
+- All v0.2.0 / v0.3.0 deep-perception layers: loop/motif detection, per-section
+  key timeline, narrative labels, stems (Demucs), CLAP embedding + tags,
+  madmom rhythm/chords, loudness, Qwen2-Audio caption, and the cut grid.
+
+### Security
+
+- Preserved the full SSRF redirect + DNS-rebinding TOCTOU fix in `analyze()`
+  URL fetching: per-hop address checks, DNS pinning to the vetted IP, manual
+  redirect following capped at 5 hops, and a streamed body size cap. URL
+  downloads go through `_fetch_url`, never `urllib.request.urlretrieve`.
+
 ## 0.1.6 — 2026-07-19
 
 Version-drift reconciliation. PyPI 0.1.5 was published from a branch that

@@ -40,6 +40,17 @@ class Section:
     label: str
     start: float
     end: float
+    motif: Optional[str] = None  # loop/reprise group letter (A, B, C...) — same letter = same recurring loop
+    key: Optional[str] = None    # per-section key, e.g. "E major" — surfaces modulations
+
+
+@dataclass(frozen=True)
+class Motif:
+    """A recurring loop/section group and where it appears in the track."""
+    label: str            # A, B, C...
+    count: int            # how many times this loop recurs
+    occurrences: list     # start times (seconds) of each occurrence
+    total_seconds: float  # total airtime of this loop across the track
 
 
 @dataclass(frozen=True)
@@ -63,6 +74,17 @@ class Analysis:
     genre: str
     mood: list[str]
     summary: str
+    motifs: list = field(default_factory=list)       # recurring loops (list[Motif])
+    structure: str = ""                              # motif sequence, e.g. "A-B-A-A-C-A"
+    key_changes: list = field(default_factory=list)  # modulation timeline
+    # v0.3 — deeper perception layers (populated per analyze() flags)
+    rhythm: dict = field(default_factory=dict)       # madmom beats/downbeats/tempo + bar grid
+    chords: dict = field(default_factory=dict)       # chord timeline + progression
+    loudness: dict = field(default_factory=dict)     # LUFS + crest factor
+    clap_tags: list = field(default_factory=list)    # zero-shot semantic tags [{tag,score}]
+    embedding: list = field(default_factory=list)    # CLAP audio embedding (the qualifier metric)
+    arrangement: dict = field(default_factory=dict)  # stem activity + in/out event timeline
+    caption: str = ""                                # Qwen2-Audio liner notes (opt-in)
     spectrogram: Optional[Image.Image] = field(default=None, repr=False)
     waveform: Optional[Image.Image] = field(default=None, repr=False)
 
