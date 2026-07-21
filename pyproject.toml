@@ -24,15 +24,15 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio :: Analysis",
 ]
 dependencies = [
-    "librosa>=0.10",
-    "matplotlib>=3.7",
-    "Pillow>=10.0",
-    "numpy>=1.24",
+    "librosa>=0.10.2",
+    "matplotlib>=3.8",
+    "Pillow>=10.3",
+    "numpy>=1.26",
     "openai-whisper>=20231117",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "build", "twine"]
+dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0"]
 # deeper perception layers (v0.3) — each capability degrades gracefully if absent
 loudness = ["pyloudnorm>=0.1"]                        # LUFS + dynamics
 embedding = ["transformers>=4.40", "torch>=2.0"]      # CLAP tags + embedding (qualifier metric)
