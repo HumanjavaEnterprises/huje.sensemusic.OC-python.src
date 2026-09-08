@@ -57,6 +57,7 @@ def to_json(analysis: Analysis) -> dict:
         "clap_tags": analysis.clap_tags,
         "embedding": analysis.embedding,
         "arrangement": analysis.arrangement,
+        "groove": analysis.groove,
         "caption": analysis.caption,
         "lyrics": [
             {"start": l.start, "end": l.end, "text": l.text}

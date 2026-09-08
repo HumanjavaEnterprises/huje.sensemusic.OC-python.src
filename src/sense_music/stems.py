@@ -30,13 +30,18 @@ def _load(device: str = "cuda"):
     return _model
 
 
-def separate(path: str, device: str = "cuda", save_dir: str | None = None) -> tuple[dict, int]:
-    """Separate a file into stems. Returns ({stem_name: mono float array}, sr)."""
+def separate(path: str, device: str = "cuda", save_dir: str | None = None,
+             duration: float | None = None) -> tuple[dict, int]:
+    """Separate a file into stems. Returns ({stem_name: mono float array}, sr).
+
+    duration caps how much audio is loaded (seconds) so we don't run Demucs over a
+    long tail the rest of the analysis already capped away; None = whole file.
+    """
     import torch, os, numpy as np, librosa
     model = _load(device)
     sr = model.samplerate
     # load via librosa (torchaudio 2.11 load now needs torchcodec; we avoid that dep)
-    arr, _ = librosa.load(path, sr=sr, mono=False)   # [ch, time] stereo, or [time] mono
+    arr, _ = librosa.load(path, sr=sr, mono=False, duration=duration)   # [ch, time] stereo, or [time] mono
     arr = np.atleast_2d(arr)
     wav = torch.from_numpy(arr.astype("float32"))
     if wav.shape[0] == 1:                          # mono -> stereo (demucs wants 2ch)

@@ -84,6 +84,7 @@ class Analysis:
     clap_tags: list = field(default_factory=list)    # zero-shot semantic tags [{tag,score}]
     embedding: list = field(default_factory=list)    # CLAP audio embedding (the qualifier metric)
     arrangement: dict = field(default_factory=dict)  # stem activity + in/out event timeline
+    groove: dict = field(default_factory=dict)       # drum voices (kick/kick2/toms/hats) + feel (swing/push-pull)
     caption: str = ""                                # Qwen2-Audio liner notes (opt-in)
     spectrogram: Optional[Image.Image] = field(default=None, repr=False)
     waveform: Optional[Image.Image] = field(default=None, repr=False)

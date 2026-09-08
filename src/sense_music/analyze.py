@@ -43,6 +43,7 @@ def analyze(
     clap_tags: bool = True,
     chords: bool = False,
     stems: bool = False,
+    groove: bool = False,
     caption: bool = False,
     device: str = "cuda",
 ) -> Analysis:
@@ -58,6 +59,8 @@ def analyze(
         clap_tags: CLAP zero-shot semantic tags (default True).
         chords: chord-progression recognition (default False; madmom, heavier).
         stems: Demucs stem separation -> arrangement timeline (default False; ~10-30s/track).
+        groove: drum-voice hearing (kick/kick2/toms/hats) + feel (swing, push/pull) from the
+            drums stem (default False; needs Demucs — reuses the stems separation if stems=True).
         caption: Qwen2-Audio free-text liner notes (default False; loads a 7B model).
         device: torch device for the ML models (default "cuda").
 
@@ -132,15 +135,27 @@ def analyze(
                 logger.warning("CLAP analysis failed: %s", exc)
 
         arrangement = {}
-        if stems:
+        _drums_stem, _stem_sr = None, None
+        if stems or groove:
             try:
                 from sense_music.stems import separate, stem_activity, arrangement_events
-                stem_audio, stem_sr = separate(audio_path, device=device)
-                activity = stem_activity(stem_audio, stem_sr)
-                arrangement = {"activity": activity,
-                               "events": arrangement_events(activity)}
+                stem_audio, _stem_sr = separate(audio_path, device=device, duration=max_duration)
+                _drums_stem = stem_audio.get("drums")
+                if stems:
+                    activity = stem_activity(stem_audio, _stem_sr)
+                    arrangement = {"activity": activity,
+                                   "events": arrangement_events(activity)}
             except Exception as exc:
                 logger.warning("Stem separation failed: %s", exc)
+
+        groove_info = {}
+        if groove:
+            try:
+                from sense_music.groove import analyze_groove
+                beats = rhythm_info.get("beats") if isinstance(rhythm_info, dict) else None
+                groove_info = analyze_groove(_drums_stem, _stem_sr, beats=beats)
+            except Exception as exc:
+                logger.warning("Groove analysis failed: %s", exc)
 
         caption_text = ""
         if caption:
@@ -189,6 +204,7 @@ def analyze(
             clap_tags=clap_tag_list,
             embedding=embed,
             arrangement=arrangement,
+            groove=groove_info,
             caption=caption_text,
             spectrogram=spectrogram_img,
             waveform=waveform_img,
