@@ -22,6 +22,10 @@ def _esc(value: str) -> str:
 def to_json(analysis: Analysis) -> dict:
     """Convert analysis to a structured dict."""
     return {
+        # inter-stage artifact contract stamp (the wire "hearing" object). version 1 is the wire
+        # stamp for this JSON shape; the perception layers themselves are tagged v0.3 in types.py.
+        "schema": "hearing",
+        "version": 1,
         "file": {
             "name": analysis.file_info.name,
             "duration": analysis.file_info.duration,

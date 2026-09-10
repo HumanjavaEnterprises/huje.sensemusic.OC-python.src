@@ -31,6 +31,13 @@ def _make_analysis():
     )
 
 
+def test_to_json_is_versioned():
+    """The hearing JSON carries a schema/version stamp (inter-stage artifact contract)."""
+    data = to_json(_make_analysis())
+    assert data["schema"] == "hearing"
+    assert data["version"] == 1
+
+
 def test_to_json_returns_dict():
     data = to_json(_make_analysis())
     assert isinstance(data, dict)
