@@ -43,16 +43,23 @@ def render_spectrogram(
             ax=ax, cmap="magma",
         )
 
-        # section markers
+        # section markers — a boundary line at every section, but THIN the text labels
+        # so they never overprint into a smear (min time-gap + no consecutive duplicates).
         if sections:
+            last_label_x = -1e9
+            last_label = None
+            min_label_gap = max(6.0, duration / 12.0)
             for section in sections:
                 color = _SECTION_COLORS.get(section.label, _ACCENT)
                 ax.axvline(x=section.start, color=color, linewidth=1.5, alpha=0.8, linestyle="--")
-                ax.text(
-                    section.start + 0.5, ax.get_ylim()[1] * 0.92,
-                    section.label, color=color, fontsize=8, fontweight="bold",
-                    va="top",
-                )
+                if section.label != last_label and (section.start - last_label_x) >= min_label_gap:
+                    ax.text(
+                        section.start + 0.5, ax.get_ylim()[1] * 0.92,
+                        section.label, color=color, fontsize=8, fontweight="bold",
+                        va="top",
+                    )
+                    last_label_x = section.start
+                    last_label = section.label
 
         # energy curve overlay
         if energy_curve:

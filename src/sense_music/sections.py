@@ -54,9 +54,16 @@ def detect_sections(y: np.ndarray, sr: int, duration: float) -> list[Section]:
         if novelty[i] > threshold and novelty[i] >= novelty[i - 1] and novelty[i] >= novelty[i + 1]:
             peaks.append(i)
 
-    # convert to times and add boundaries
+    # cap the number of boundaries so a long track doesn't over-segment into dozens of
+    # tiny slices (the "39 sections" bug). Keep only the STRONGEST novelty peaks, scaled
+    # to duration (~one boundary per 25s, clamped 3..11), then restore time order.
+    max_boundaries = int(min(11, max(3, round(duration / 25.0))))
+    if len(peaks) > max_boundaries:
+        peaks = sorted(sorted(peaks, key=lambda i: novelty[i], reverse=True)[:max_boundaries])
+
+    # convert to times and add boundaries (min section length scales with duration)
     boundary_times = [0.0]
-    min_section_duration = 5.0  # seconds
+    min_section_duration = max(8.0, duration / 20.0)  # seconds
     for p in peaks:
         t = float(times[p])
         if t - boundary_times[-1] >= min_section_duration and duration - t >= min_section_duration:
@@ -67,7 +74,15 @@ def detect_sections(y: np.ndarray, sr: int, duration: float) -> list[Section]:
     # steady loop-driven piece still gets a real narrative arc (not all "verse").
     boundaries = [(boundary_times[i], boundary_times[i + 1]) for i in range(len(boundary_times) - 1)]
     labels = _label_sections(y, sr, boundaries)
-    sections = [Section(label=lab, start=s, end=e) for (s, e), lab in zip(boundaries, labels)]
+
+    # merge consecutive sections that got the SAME label (a run of "groove groove groove"
+    # is one groove) — keeps the count honest and matches the structure bar.
+    sections: list[Section] = []
+    for (s, e), lab in zip(boundaries, labels):
+        if sections and sections[-1].label == lab:
+            sections[-1] = Section(label=lab, start=sections[-1].start, end=e)
+        else:
+            sections.append(Section(label=lab, start=s, end=e))
 
     return sections if sections else [Section(label="intro", start=0.0, end=round(duration, 1))]
 
